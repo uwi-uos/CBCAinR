@@ -1,0 +1,288 @@
+Note: The original R script stems from: 
+
+Burda, Daniel, and Frank Teuteberg. "Understanding the benefit structure of cloud storage as a means of personal archiving-a choice-based conjoint analysis." (2014).
+Burda, Daniel, and Frank Teuteberg. "Exploring consumer preferences in cloud archiving–a student's perspective." Behaviour & Information Technology 35.2 (2016): 89-105.
+
+It has been adapted to investigate the preferences of AR systems in Production Environments. In this course, it has been enriched with methodological instructions to facilitate its application for researchers without background knowledge.
+
+The script is intended to provide researchers with an example of the application of a CBCA in R Studio. In doing so, it demonstrates how the original Script by Burda and Teuteberg (2014) can be adapted to research projects. 
+
+1.) DESIGN 
+
+Hint: All .txt and .csv will be stored in your R Project Folder. 
+
+#Load the necessary libraries before the analysis can be obtained.
+
+rm(list=ls())
+library(AlgDesign)
+library(MASS)
+
+library(AlgDesign)
+library(MASS)
+
+#Step 1: Create a full factorial design --> Numbers in the bracket refers to the number of levels per attribute. 
+
+ffd <-gen.factorial(c(3,3,2,2,3), varNames=c("productivity_gain", "monitoring", "safety", "ease_of_use", "reward"), factors="all")
+str(ffd)
+set.seed(54321)
+
+#Step 2: generating a fractional factorial design, where 17 refers to the number of choice sets that you want to obtain. 
+design <-optFederov(~.,ffd,17)
+str(design)
+
+#Step 3: Making copies of the fractional design (s-1 copies)
+alt1 <-design$design
+alt2 <-alt1
+
+#Step 4: creating choice sets by using random selection without replacement
+alt1 <-cbind(Choiceset=sample(seq(1,17)),Stimulus=1,NKO=0,alt1)
+alt2 <-cbind(Choiceset=sample(seq(1,17)),Stimulus=2,NKO=0,alt2)
+
+#Step 5: each fractional factorial design by corresponding uniform variable
+alt1_sort = alt1[order(alt1$Choiceset),]
+alt2_sort = alt2[order(alt2$Choiceset),]
+
+#Step 6: Create Choice Scenarios
+
+choiceS = rbind(alt1_sort, alt2_sort)
+choiceS = choiceS[order(choiceS$Choiceset),]
+
+#Step 7: Apply Effects Coding, where  (ncol: 1 (Choice Set) + 1 (Choice ID) + 3 (No Choice) + 4 (Productivity_Gain) + 5 (Monitoring) + 6 (Safety) + 7 (Easy_of_use) + 8 (Reward) --> See Bech, M., & Gyrd‐Hansen, D. (2005). Effects coding in discrete choice experiments. Health economics, 14(10), 1079-1083. for more Information concerning Effects Coding
+
+designM = matrix(0, ncol = (1+1+1+2+2+1+1+2), nrow = (2*17))
+for (i in 1:(2*17)) {
+       designM[i,1] = choiceS[i,1]
+       designM[i,2] = choiceS[i,2]
+        if (choiceS[i,4] == 1) {designM[i,4] = 1}
+        if (choiceS[i,4] == 2) {designM[i,5] = 1}
+        if (choiceS[i,4] == 3) {designM[i,4:5] = -1}
+        if (choiceS[i,5] == 1) {designM[i,6] = 1}
+        if (choiceS[i,5] == 2) {designM[i,7] = 1}
+        if (choiceS[i,5] == 3) {designM[i,6:7] = -1}
+        if (choiceS[i,6] == 1) {designM[i,8] = 1}
+        if (choiceS[i,6] == 2) {designM[i,8] = -1}
+        if (choiceS[i,7] == 1) {designM[i,9] = 1}
+        if (choiceS[i,7] == 2) {designM[i,9] = -1}
+        if (choiceS[i,8] == 1) {designM[i,10] = 1}
+        if (choiceS[i,8] == 2) {designM[i,11] = 1}
+        if (choiceS[i,8] == 3) {designM[i,10:11] = -1}  
+  }
+
+#Step 8: Optional: Create No Choice Option, if you want to provide more realistic choice situations (e.g. in buying-decisions). 
+noChoice = matrix(0, ncol = (1+1+1+2+2+1+1+2), nrow = 17)
+
+for (i in 1:17) {
+  noChoice[i,1] = i
+  noChoice[i,2] = 3
+  noChoice[i,3] = 1
+  }
+
+#Step 9: Combine matrix "designM" with no choice matrix "noChoice"
+designM = rbind(designM,noChoice)
+designM = designM[order(designM[,1]),]
+
+# Step 10: Export final Design to text file and translate it to be able to implement the survey.
+write.table(designM, file = "design_effect_coded.txt")
+
+
+2.) ANALYSIS 
+
+
+Hint: All .txt and .csv will be stored in your R Project Folder. 
+
+#Load the necessary libraries before the analysis can be obtained.
+rm(list=ls())
+library(AlgDesign)
+library(MASS)
+library(bayesm)
+library(plotrix)
+
+#Load the hitrate function adapted to your research object.
+source("Hitrate.R") #see Burda and Teuteberg (2014)
+
+
+#Define number of respondents
+n=204
+
+#Read study design from file --> For a detailed Introduction into Effects Coding see: e.g. Dawly et al. - Dummy coding vs effects coding for categorical variables: Clarifications and extensions
+designM <- read.table("design_effect_coded.txt", header=TRUE)
+
+#delete col 1,2 to remove choice scenario ID and choice set ID (not needed for the computation of the results)
+designM = designM[,3:ncol(designM)]
+
+#Assign col names --> Add only the names of the levels where you expect the highest benefit and neglect the level where you expect the lowest benefit (e.g. highest price). 
+colnames(designM) <- c("NoChoice", "High_Increase", "Slight_Increase", "No_Profiles", "Anonymous_Profiles",  "Safety_Functions, "Ease_of_Use", "200_euros", "100_euros")
+
+
+#separate hold out cards from choice scenarios --> The hold-out tasks can later be used to investigate the predictive validity of your model.
+holdoutSet_x = designM[46:51,]
+designM = designM[1:45,]
+
+
+#Read respondent choices: Important: Do not assign any row and column names. The results table should have N * M rows and columns, where N is the number of respondents and M is the number of Choice Sets.
+y = read.table("Results.txt", header=FALSE)
+
+
+#Remove hold out responses --> The hold-out responses are not used for the estimaten but can be used later to investigate the predictive validity of your model.
+holdoutSet_y = y[,16:17]
+y = y[,1:15]
+
+
+#Prepare data input for bayes estimation
+#combine response data with choice design
+cbc_input=NULL
+R= 10000 #Number of iterations
+keep = 5 #Thinning Parameter: It is recommended to use this parameter given that the draws of MCMCs are autocorrelated
+
+for (i in 1:n){
+  cbc_input[[i]] = list(y = matrix(as.numeric(y[i,])),X = as.matrix(designM))
+  }
+
+Prior = list(ncomp = 1)
+mcmc=list(R= 10000, keep = 5) #see above
+Data = list(p=3, lgtdata=cbc_input)
+
+#Execute HB estimation --> for a detailed documentation see: https://www.rdocumentation.org/packages/bayesm/versions/3.0-2/topics/rhierMnlRwMixture 
+out = rhierMnlRwMixture(Data=Data, Prior=Prior, Mcmc=mcmc)
+
+
+#Calculated std. error
+partwU_draws = matrix(0, ncol = 14, nrow = (R/keep)*n)
+k = 1
+
+for (i in 1:n) {
+  
+  for (dr in 1:(R/keep)) {
+    
+    partwU_draws[k,1] = out$betadraw[i,1,dr] 
+    partwU_draws[k,2] = out$betadraw[i,2,dr] 
+    partwU_draws[k,3] = out$betadraw[i,3,dr] 
+    partwU_draws[k,4] = (out$betadraw[i,2,dr] + out$betadraw[i,3,dr])* (-1) 
+    partwU_draws[k,5] = out$betadraw[i,4,dr] 
+    partwU_draws[k,6] = out$betadraw[i,5,dr] 
+    partwU_draws[k,7] = (out$betadraw[i,4,dr] + out$betadraw[i,5,dr])* (-1) 
+    partwU_draws[k,8] = out$betadraw[i,6,dr] 
+    partwU_draws[k,9] = out$betadraw[i,6,dr] * (-1) 
+    partwU_draws[k,10] = out$betadraw[i,7,dr] 
+    partwU_draws[k,11] = out$betadraw[i,7,dr]* (-1) 
+    partwU_draws[k,12] = out$betadraw[i,8,dr] 
+    partwU_draws[k,13] = out$betadraw[i,9,dr] 
+    partwU_draws[k,14] = (out$betadraw[i,8,dr] + out$betadraw[i,9,dr])* (-1) 
+    k = k + 1  
+    
+  }
+  
+} 
+
+
+partwU_std_err = matrix(0, ncol = 14, nrow = 1)
+for (i in 1:14) {  
+  partwU_std_err[,i] = std.error(partwU_draws[,i])
+}
+#Store std. errors
+partwU_draws_stderr= t(rbind(partwU_draws, partwU_std_err, row.names=NULL))
+
+
+#Aggregated mean part worth utilities 
+agg_partwU = matrix(apply(out$betadraw[,,1:(R/keep)],2,mean), ncol=9, nrow =1)
+
+#Assign col names --> Add only the names of the levels where you expect the highest benefit and neglect the level where you expect the lowest benefit (e.g. highest price).
+colnames(agg_partwU) <- c("NoChoice", "High_Increase", "Slight_Increase", "No_Profiles", "Anonymous_Profiles",  "Safety_Functions", "Ease_of_Use", "200_euros", "100_euros")
+                                      
+
+#Means of inidividual part worth utilities
+partwU_indi = matrix(0, ncol = n, nrow = 9)
+
+for (i in 1:n) {
+  partwU_indi[,i] = t(rowMeans(out$betadraw[i,,1:R/keep]))  
+}
+
+
+# Create matrix for hit rate calculation and loglikelihood test
+m_hitrate = matrix(0, nrow = n, ncol = 1)
+m_hitrate_holdout = matrix(0, nrow = n, ncol = 1)
+
+h_design_matrix = data.matrix(designM)
+h_design_matrix_holdout = data.matrix(holdoutSet_x)
+
+cntEstimates =nrow(partwU_indi)
+m_loglikelihood = matrix(0, nrow = n+2, ncol = 4)
+m_zero_partworths = matrix(0, nrow = cntEstimates, ncol = 1)
+
+
+for (i in 1:n) {
+  #Following lines determine the hitrate using self-build function det_hitrate 
+  h_indvi_partworths <- as.matrix(partwU_indi[,i], rownames = FALSE)
+  h_choices <- t(as.matrix(y[i,], rownames = FALSE))    
+  m_hitrate[i,1] <- det_hitrate(h_indvi_partworths, h_choices, h_design_matrix)
+  #write.table(m_hitrate,file= "Hitrate.txt")
+  
+  #Hitrate determination for Hold Out Sets
+  h_hoices_holdout <- t(as.matrix(holdoutSet_y[i,], rownames = FALSE)) 
+  m_hitrate_holdout[i,1] <- det_hitrate(h_indvi_partworths, h_hoices_holdout, h_design_matrix_holdout)
+  #write.table(m_hitrate_holdout,file= "Hitrate_Holdout.txt")
+  
+  #Likelihood Ratio Test --> You will find the LR-Results in the last line. The significance level can be read in the bottom right-hand corner.
+  m_loglikelihood[i,1] <- llmnl(m_zero_partworths,h_choices, h_design_matrix )
+  m_loglikelihood[i,2] <- llmnl(h_indvi_partworths, h_choices, h_design_matrix)
+  m_loglikelihood[i,3] <- (-2) * (m_loglikelihood[i,1] - m_loglikelihood[i,2])
+  #m_loglikelihood[i,4] <- pchisq(m_loglikelihood[i,3],cntEstimates,lower.tail=FALSE)
+  
+}
+
+#Likelihood Ratio Test based on aggregated data --> You will find the LR-Results in the last line. The significance level can be read in the bottom right-hand corner.
+m_loglikelihood[n+2,1] <- m_loglikelihood[n,1]
+m_loglikelihood[n+2,2] <- rowMeans(t(m_loglikelihood[1:n,2]))
+m_loglikelihood[n+2,3] <- (-2) * (as.numeric(m_loglikelihood[n+2,1]) - as.numeric(m_loglikelihood[n+2,2]))
+m_loglikelihood[n+2,4] <- pchisq(as.numeric(m_loglikelihood[n+2,3]),cntEstimates,lower.tail=FALSE)
+m_loglikelihood[n+1,1:4] <- "-----"
+write.table(m_loglikelihood,file= "Likelihood_Ratio_Test.txt")
+
+
+
+#Assign col names to partwU_indi --> Again: Add only the names of the levels with highest benefit and neglect the level where you expect the lowest benefit (e.g. highest price) due to effects coding.
+rownames(partwU_indi) <- c("NoChoice", "High_Increase", "Slight_Increase", "No_Profiles", "Anonymous_Profiles",  "Safety_Activated", "Easy_to_Use", "200_euros", "100_euros")
+
+
+#Build matrix with individual part worth utilities for all attribute levels
+partwU_noCho = matrix(data = partwU_indi[1,], ncol = n , nrow=1)
+partwU_productivity_gain = rbind(partwU_indi[2:3,], 0 - partwU_indi[2,] - partwU_indi[3,])
+partwU_monitoring = rbind(partwU_indi[4:5,], 0 - partwU_indi[4,] - partwU_indi[5,])
+partwU_safety = rbind(partwU_indi[6,], 0 - partwU_indi[6,])
+partwU_ease_of_use = rbind(partwU_indi[7,], 0 - partwU_indi[7,])
+partwU_reward = rbind(partwU_indi[8:9,], 0 - partwU_indi[8,] - partwU_indi[9,])
+
+m_partwU = rbind(partwU_noCho, partwU_productivity_gain, partwU_monitoring, partwU_safety,
+            partwU_ease_of_use, partwU_reward, row.names = NULL)
+
+m_partwU_transp= t(m_partwU)
+write.table(m_partwU_transp, file= "Indiv_partw.txt")
+
+
+
+#Attribute range
+att_range = matrix(0, 0, ncol = n, nrow = 6)
+
+for (i in 1:n) {
+ att_range[1,i] = max(partwU_productivity_gain[,i]) - min(partwU_productivity_gain[,i])
+ att_range[2,i] = max(partwU_monitoring[,i]) - min(partwU_monitoring[,i])
+ att_range[3,i] = max(partwU_safety[,i]) - min(partwU_safety[,i])
+ att_range[4,i] = max(partwU_ease_of_use[,i]) - min(partwU_ease_of_use[,i])
+ att_range[5,i] = max(partwU_reward[,i]) - min(partwU_reward[,i])
+ att_range[6,i] = sum(att_range[1:5,i])
+  }
+#Aggregate  values
+agg_att_range = matrix(rowMeans(att_range), ncol = 6 , nrow=1)
+colnames(agg_att_range) <- c("productivity_gain", "monitoring", "safety", "ease_of_use", "reward", "Sum")
+
+
+#Calculate relative importance in accordance by calculating the ratio of the attribute range to the total utility span across all attributes
+m_relimp = matrix(0, 0, ncol = n, nrow = 5)
+
+for (i in 1:n) {
+  m_relimp[1,i] = (att_range[1,i] / att_range[6,i])*100
+  m_relimp[2,i] = (att_range[2,i] / att_range[6,i])*100
+  m_relimp[3,i] = (att_range[3,i] / att_range[6,i])*100
+  m_relimp[4,i] = (att_range[4,i] / att_range[6,i])*100
+  m_relimp[5,i] = (att_range[5,i] / att_range[6,i])*100
+  }
